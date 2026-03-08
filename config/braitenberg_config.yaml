@@ -1,0 +1,3 @@
+const: 0
+detection_threshold: 1000.0
+gain: 0
