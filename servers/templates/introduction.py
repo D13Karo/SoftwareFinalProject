@@ -74,7 +74,7 @@ _CONTENT = '''
                 <div class="card-header">Assignment</div>
                 <div class="instructions">
                     <p>Edit the student file and implement <code>get_motor_speeds()</code>:</p>
-                    <div class="file-path">tasks/introduction/packages/keyboard_control.py</div>
+                    <div class="file-path">tasks/introduction/packages/manual_drive.py</div>
                     <p style="margin-top:8px">
                         Forward = both wheels positive.<br>
                         Turn = one wheel faster than the other.<br>
