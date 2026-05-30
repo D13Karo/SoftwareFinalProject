@@ -144,4 +144,4 @@ Some pre bilt maps were made for some project you can try convoing, take_over an
 
 ## 12. Bugs
 
-If you find any bugs, contact Davit Tsulaia. This map maker was made in one week so it is not perfectly polished the lead developer had a game jam to WIN.
+If you find any bugs, contact Davit Tsulaia. This map maker was made in one week so it is not perfectly polished the lead developer has a game jam to WIN.
