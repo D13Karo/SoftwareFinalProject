@@ -9,3 +9,4 @@ requests
 pyserial
 jupyter
 matplotlib
+onnxruntime

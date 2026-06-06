@@ -16,6 +16,7 @@ GODOT_SCENES = {
     'visual_lane_servoing': 'res://scenes/lane_follower.tscn',
     'introduction': 'res://scenes/introduction.tscn',
     'modcon': 'res://scenes/Modconpath.tscn',
+    'object_detection': 'res://scenes/lane_follower.tscn',
 }
 
 DEFAULT_WEB_PORT = 5000

@@ -63,6 +63,15 @@ def control_loop():
             if wheels:
                 wheels.set_wheels_speed(left, right)
 
+            # Update virtual LED states based on movement
+            if keys_copy.get('left'):
+                led_updates = led_control.set_turning_leds('left')
+            elif keys_copy.get('right'):
+                led_updates = led_control.set_turning_leds('right')
+            else:
+                led_updates = led_control.set_driving_leds(left, right)
+            _virtual_led_states.update(led_updates)
+
             time.sleep(0.05)  # 20 Hz
 
         except Exception as e:
