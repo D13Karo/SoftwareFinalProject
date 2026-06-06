@@ -1,20 +1,3 @@
-# Tunable parameters for the object_detection task.
-# These are read by ObjectDetectionAgent when present; otherwise defaults apply.
-
-# How quickly the speed ramps toward 0 when an obstacle appears (per frame).
-decel_rate: 0.04
-
-# How quickly speed ramps back up when the obstacle is gone (per frame).
-accel_rate: 0.03
-
-# How many consecutive "no obstacle" control-loop frames must elapse before
-# the agent transitions out of OBSTACLE_PRESENT back to LANE_FOLLOWING.
-release_frames: 3
-
-# Wall-clock seconds of continuous "no obstacle" the detector must report
-# before releasing. Latches the STOP state through brief YOLO flicker.
-release_seconds: 1.0
-
-# Pixel scale passed to stop_activity.should_stop(). The provided
-# stop_activity uses Y2_RATIO and AREA_RATIO against this image size.
-image_size: 640
+img_size: 416
+conf_threshold: 0.7
+nms_threshold: 0.45
