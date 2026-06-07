@@ -16,9 +16,9 @@ class RobotState(Enum):
     RESUMING = auto()
 
 def detect_sign(frame):
-    import apriltag
+    from pupil_apriltags import Detector
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    detector = apriltag.Detector()
+    detector = Detector()
     results = detector.detect(gray)
     if len(results) == 0:
         return None, None
