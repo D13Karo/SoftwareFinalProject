@@ -1,0 +1,15 @@
+tag_id_map:
+  1: "stop"
+  2: "yield"
+  3: "no-right-turn"
+  4: "no-left-turn"
+  8: "4-way-intersect"
+  9: "right-T-intersect"
+  10: "left-T-intersect"
+  11: "T-intersection"
+
+thresholds:
+  stop_wait_seconds: 3
+  yield_wait_seconds: 2
+  detection_confidence: 0.5
+  turn_duration_seconds: 1.5
