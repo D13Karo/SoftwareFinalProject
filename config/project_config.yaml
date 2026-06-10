@@ -12,4 +12,20 @@ thresholds:
   stop_wait_seconds: 3
   yield_wait_seconds: 2
   detection_confidence: 0.5
-  turn_duration_seconds: 1.5
+  # Closed-loop intersection turn: turn until the lane is re-acquired, centered.
+  turn_min_seconds: 0.6      # sweep off the entry lane before checking for a lane
+  turn_max_seconds: 1.5      # cap = ~90 deg of rotation, so it can't over-rotate to 180
+  turn_align_steer: 0.12     # |left-right| below this = aligned with the new lane
+  # Crossing an intersection straight (the follower can't track crossing markings):
+  cross_min_seconds: 1.2     # go straight at least this long before checking for a lane
+  cross_max_seconds: 3.5     # safety cap on the straight crossing
+  # After a turn, ignore signs this long so the bot clears the intersection
+  # instead of turning at the next turn sign (prevents looping in a square).
+  sign_cooldown_seconds: 8.0
+  # Ignore AprilTags whose longest edge is smaller than this (px): react at the
+  # sign, not from across the map. Lower = stop further back (more margin).
+  min_tag_pixels: 46
+  # Only stop for obstacles whose horizontal center falls in this band of the
+  # frame (the lane straight ahead). Ducks on the oncoming/side lanes are ignored.
+  obstacle_lane_min: 0.33
+  obstacle_lane_max: 0.72

@@ -1,0 +1,12 @@
+# Lane-following tuning for the PROJECT task only (the visual_lane_servoing task
+# keeps its own lane_servoing_config.yaml). Tuned to hold the map's sharp 90-deg
+# curve tiles: slow down and steer harder on curves so it doesn't cut the corner.
+base_speed: 0.1
+curve_speed: 0.06        # was 0.15 (faster than base) -> now crawl through curves
+curve_boost: 1.5         # was 1.3 -> stronger steering on detected curves
+curve_threshold: 300     # was 350 -> detect curves a bit earlier
+max_steer: 0.5           # was 0.4 -> allow sharper steering into corners
+p_gain: 0.1
+d_gain: 0.35             # was 0.3 -> a little more damping
+steering_threshold: 0.2
+detection_threshold: 100
