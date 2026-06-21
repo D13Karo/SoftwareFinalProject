@@ -25,6 +25,13 @@ _data = {
 }
 point_count = 33
 
+[sub_resource type="Curve3D" id="Curve3D_npccross"]
+_data = {
+"points": PackedVector3Array(0, 0, 0, 0, 0, 0, 7.8, 0.091, 5.62, 0, 0, 0, 0, 0, 0, 5, 0.091, 5.62, 0, 0, 0, 0, 0, 0, 5, 0.091, 5.78, 0, 0, 0, 0, 0, 0, 7.8, 0.091, 5.78),
+"tilts": PackedFloat32Array(0, 0, 0, 0)
+}
+point_count = 4
+
 [sub_resource type="BoxShape3D" id="BoxShape3D_k563b"]
 size = Vector3(28.8, 0.1, 28.8)
 
@@ -316,6 +323,15 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.832, 0.155, 6.9)
 [node name="TopView" type="Camera3D" parent="DuckieBot" unique_id=1887255741]
 transform = Transform3D(1, 0, 0, 0, 0.34202015, 0.9396926, 0, -0.9396926, 0.34202015, 0, 1, 0.8)
 current = true
+
+[node name="NPCPath" type="Path3D" parent="." unique_id=264413954]
+curve = SubResource("Curve3D_npccross")
+
+[node name="PathFollower" type="PathFollow3D" parent="NPCPath" unique_id=1486107170]
+script = ExtResource("11_ucdee")
+speed = 0.6
+
+[node name="DuckieBot_NPC" parent="NPCPath/PathFollower" unique_id=2001605540 instance=ExtResource("12_3bncg")]
 
 [node name="Sun" type="DirectionalLight3D" parent="." unique_id=1159425448]
 transform = Transform3D(0.8660254, -0.4829629, 0.12940954, 0, 0.25881907, 0.9659258, -0.5, -0.83651626, 0.22414389, 4.8, 20, 4.8)

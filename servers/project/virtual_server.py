@@ -11,16 +11,16 @@ import numpy as np
 import cv2
 from flask import Flask, Response, jsonify, request
 
-from Assignment6_CollisionChecker.KvatiTown.duckiebot.camera_driver.godot_camera_driver import GodotCameraDriver, GodotCameraConfig
-from Assignment6_CollisionChecker.KvatiTown.duckiebot.wheel_driver.godot_wheels_driver import GodotWheelsDriver
-from Assignment6_CollisionChecker.KvatiTown.duckiebot.wheel_driver.wheels_driver_abs import WheelPWMConfiguration
-from Assignment6_CollisionChecker.KvatiTown.duckiebot.led_driver.virtual_led_driver import VirtualLEDsDriver
-from Assignment6_CollisionChecker.KvatiTown.launcher.ports import find_available_port
-from Assignment6_CollisionChecker.KvatiTown.servers.common import make_frame_generator, shutdown_cleanup, suppress_http_logs
-from Assignment6_CollisionChecker.KvatiTown.servers.templates.project import get_template
+from duckiebot.camera_driver.godot_camera_driver import GodotCameraDriver, GodotCameraConfig
+from duckiebot.wheel_driver.godot_wheels_driver import GodotWheelsDriver
+from duckiebot.wheel_driver.wheels_driver_abs import WheelPWMConfiguration
+from duckiebot.led_driver.virtual_led_driver import VirtualLEDsDriver
+from launcher.ports import find_available_port
+from servers.common import make_frame_generator, shutdown_cleanup, suppress_http_logs
+from servers.templates.project import get_template
 
-import Assignment6_CollisionChecker.KvatiTown.tasks.project.packages.agent as agent
-from Assignment6_CollisionChecker.KvatiTown.tasks.project.packages.agent import TAG_ID_MAP
+import tasks.project.packages.agent as agent
+from tasks.project.packages.agent import TAG_ID_MAP
 
 
 app        = Flask(__name__)

@@ -29,3 +29,14 @@ thresholds:
   # frame (the lane straight ahead). Ducks on the oncoming/side lanes are ignored.
   obstacle_lane_min: 0.33
   obstacle_lane_max: 0.72
+  # Require the same nearest tag for this many consecutive frames before acting
+  # (rejects single-frame false detections).
+  tag_confirm_frames: 2
+  # Peek-left/right at stop & yield signs (lets cross traffic pass). Tune the
+  # spin speeds/durations to the sim so the bot glances ~90 deg each way.
+  peek_turn_left:  [-0.06, 0.06]   # pivot in place to glance left (no forward drift)
+  peek_turn_right: [0.06, -0.06]   # pivot in place to glance right (no forward drift)
+  peek_turn_seconds: 0.6          # spin time for a ~quarter turn
+  peek_hold_seconds: 1.0          # seconds to scan each side
+  left_yield_timeout_seconds: 10.0  # max wait for a left vehicle before going anyway
+  vehicle_clear_frames: 3         # consecutive clear checks required before proceeding

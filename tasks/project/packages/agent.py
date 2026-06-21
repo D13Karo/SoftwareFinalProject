@@ -83,46 +83,101 @@ def set_state_leds(leds, state):
         leds.set_rgb(i, color)
 
 
+# AprilTag detection backend. pupil_apriltags is primary (known-good here); the
+# OpenCV aruco 36h11 detector is a fallback for environments where
+# pupil_apriltags isn't installed.
 _detector = None
+_detector_backend = None   # "pupil" | "aruco" | "none"
 
 
 def _get_detector():
     """Build the AprilTag detector once and reuse it.
 
-    Constructing a Detector per frame leaks an os.add_dll_directory handle on
-    Windows (crashes with WinError 206 after a few hundred frames) and is slow.
+    Tries pupil_apriltags first, then OpenCV's aruco 36h11 detector. Building a
+    detector per frame leaks an os.add_dll_directory handle on Windows (crashes
+    with WinError 206 after a few hundred frames) and is slow, so we cache the
+    instance and the chosen backend.
     """
-    global _detector
-    if _detector is None:
+    global _detector, _detector_backend
+    if _detector_backend is not None:
+        return _detector
+
+    try:
         from pupil_apriltags import Detector
-        _detector = Detector()
+        _detector = Detector(families="tag36h11")
+        _detector_backend = "pupil"
+        return _detector
+    except Exception as e:
+        print(f"[project] pupil_apriltags unavailable ({e}); trying OpenCV aruco")
+
+    try:
+        aruco = cv2.aruco
+        dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+        _detector = aruco.ArucoDetector(dictionary, aruco.DetectorParameters())
+        _detector_backend = "aruco"
+        return _detector
+    except Exception as e:
+        print(f"[project] no AprilTag backend available ({e}); sign detection disabled")
+        _detector_backend = "none"
+        _detector = None
     return _detector
 
 
-def _tag_size(result):
+def _edge_size(corners):
     """Apparent size of a tag = its longest edge in pixels (grows as we approach)."""
-    c = result.corners
+    c = np.asarray(corners, dtype=float)
     return max(float(np.linalg.norm(c[i] - c[(i + 1) % 4])) for i in range(4))
 
 
+def _raw_detections(frame):
+    """Return [(tag_id, corners)] for every tag in `frame`, via the active backend."""
+    det = _get_detector()
+    if det is None:
+        return []
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if _detector_backend == "aruco":
+        corners, ids, _ = det.detectMarkers(gray)
+        if ids is None:
+            return []
+        return [(int(i), c.reshape(-1, 2)) for c, i in zip(corners, ids.flatten())]
+    return [(int(r.tag_id), np.asarray(r.corners, dtype=float)) for r in det.detect(gray)]
+
+
+# Temporal confirmation: require the same nearest tag for this many consecutive
+# frames before acting, so a single noisy frame can't trigger a maneuver.
+TAG_CONFIRM_FRAMES = config["thresholds"].get("tag_confirm_frames", 2)
+_pending_tag = None
+_pending_count = 0
+
+
 def detect_sign(frame):
-    """Return (tag_id, sign) for the closest tag, but only once it's near enough.
+    """Return (tag_id, sign) for the closest tag once it's near enough AND has
+    been seen for TAG_CONFIRM_FRAMES consecutive frames; otherwise (None, None).
 
     Picks the largest (closest) tag in view and ignores it while it's still far
     (below MIN_TAG_PIXELS), so the bot acts at the sign rather than from afar.
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    results = _get_detector().detect(gray)
+    global _pending_tag, _pending_count
 
-    if len(results) == 0:
+    nearest_id, nearest_size = None, 0.0
+    for tag_id, corners in _raw_detections(frame):
+        s = _edge_size(corners)
+        if s > nearest_size:
+            nearest_id, nearest_size = tag_id, s
+
+    if nearest_id is None or nearest_size < MIN_TAG_PIXELS:
+        _pending_tag, _pending_count = None, 0
         return None, None
 
-    nearest = max(results, key=_tag_size)
-    if _tag_size(nearest) < MIN_TAG_PIXELS:
+    if nearest_id == _pending_tag:
+        _pending_count += 1
+    else:
+        _pending_tag, _pending_count = nearest_id, 1
+
+    if _pending_count < TAG_CONFIRM_FRAMES:
         return None, None
 
-    sign = TAG_ID_MAP.get(nearest.tag_id, "unknown")
-    return nearest.tag_id, sign
+    return nearest_id, TAG_ID_MAP.get(nearest_id, "unknown")
 
 
 _lane_agent = None
@@ -172,6 +227,9 @@ def execute_turn(wheels, camera, turn, stop_event):
     while True:
         if stop_event.is_set():
             return True
+        if obstacle_ahead()[0]:
+            wheels.set_wheels_speed(0.0, 0.0)
+            return False    # obstacle: let the main loop's obstacle gate take over
         wheels.set_wheels_speed(left, right)
         elapsed = time.time() - t0
         if elapsed >= TURN_MAX_SECONDS:
@@ -199,6 +257,9 @@ def cross_intersection(wheels, camera, stop_event):
     while True:
         if stop_event.is_set():
             return True
+        if obstacle_ahead()[0]:
+            wheels.set_wheels_speed(0.0, 0.0)
+            return False    # obstacle: let the main loop's obstacle gate take over
         wheels.set_wheels_speed(0.13, 0.13)
         elapsed = time.time() - t0
         if elapsed >= CROSS_MAX_SECONDS:
@@ -220,6 +281,91 @@ def cross_intersection(wheels, camera, stop_event):
                     good = 0
         if stop_event.wait(0.05):
             return True
+
+
+# --- peek left/right + left-priority yield (lets cross traffic pass) ---
+# A forward-facing camera can't see the cross streets, so at a stop/yield the bot
+# rotates to glance left, then right, watching for another robot each way. Left
+# has priority: a vehicle on the left means we yield until it clears.
+PEEK_TURN_LEFT       = config["thresholds"].get("peek_turn_left",  [-0.06, 0.06])
+PEEK_TURN_RIGHT      = config["thresholds"].get("peek_turn_right", [0.06, -0.06])
+PEEK_TURN_SECONDS    = config["thresholds"].get("peek_turn_seconds", 0.6)   # ~quarter turn
+PEEK_HOLD_SECONDS    = config["thresholds"].get("peek_hold_seconds", 1.0)   # scan each side
+LEFT_YIELD_TIMEOUT   = config["thresholds"].get("left_yield_timeout_seconds", 10.0)
+VEHICLE_CLEAR_FRAMES = config["thresholds"].get("vehicle_clear_frames", 3)
+
+
+def _peek_spin(wheels, camera, speeds, seconds, stop_event):
+    """Spin in place for `seconds`, keeping the detector thread fed with frames.
+    Returns "stopped" (stop_event), "obstacle", or None when finished."""
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        if stop_event.is_set():
+            return "stopped"
+        if obstacle_ahead()[0]:
+            return "obstacle"
+        wheels.set_wheels_speed(speeds[0], speeds[1])
+        ok, frame = camera.read()
+        if ok and frame is not None:
+            _publish_frame(frame)
+        if stop_event.wait(0.05):
+            return "stopped"
+    return None
+
+
+def _peek_scan(wheels, camera, seconds, stop_event):
+    """Hold still and watch for cross traffic for `seconds`.
+    Returns (seen, status) where status is None, "stopped", or "obstacle"."""
+    wheels.set_wheels_speed(0.0, 0.0)
+    t0 = time.time()
+    seen = False
+    while time.time() - t0 < seconds:
+        if stop_event.is_set():
+            return seen, "stopped"
+        if obstacle_ahead()[0]:
+            return seen, "obstacle"
+        ok, frame = camera.read()
+        if ok and frame is not None:
+            _publish_frame(frame)
+        if cross_traffic():
+            seen = True
+        if stop_event.wait(0.05):
+            return seen, "stopped"
+    return seen, None
+
+
+def peek_left_right(wheels, camera, stop_event):
+    """Glance left, then right, watching for cross traffic each way.
+
+    Returns "left" (vehicle on the left -> must yield, left has priority),
+    "right"/"clear" (safe to go), "stopped" (stop_event), or "obstacle".
+    """
+    status = _peek_spin(wheels, camera, PEEK_TURN_LEFT, PEEK_TURN_SECONDS, stop_event)
+    if status:
+        return status
+    left_seen, status = _peek_scan(wheels, camera, PEEK_HOLD_SECONDS, stop_event)
+    if status:
+        return status
+    # swing right, past centre
+    status = _peek_spin(wheels, camera, PEEK_TURN_RIGHT, PEEK_TURN_SECONDS * 2, stop_event)
+    if status:
+        return status
+    right_seen, status = _peek_scan(wheels, camera, PEEK_HOLD_SECONDS, stop_event)
+    if status:
+        return status
+    # re-centre
+    status = _peek_spin(wheels, camera, PEEK_TURN_LEFT, PEEK_TURN_SECONDS, stop_event)
+    if status:
+        return status
+
+    if left_seen:
+        print("Peek: vehicle on the LEFT - yielding (left has priority)")
+        return "left"
+    if right_seen:
+        print("Peek: vehicle on the RIGHT - we have priority, proceeding")
+        return "right"
+    print("Peek: no cross traffic - proceeding")
+    return "clear"
 
 
 # --- obstacle stopping + right-of-way ---
@@ -324,6 +470,7 @@ def main(camera, wheels, leds, stop_event):
     clear_streak = 0        # consecutive "intersection clear" checks in YIELD_CHECK
     announced_yield = False
     resume_cooldown_until = 0.0   # ignore signs until this time after a sign action
+    yield_deadline = 0.0          # YIELD_CHECK: time after which we proceed anyway
     set_state_leds(leds, state)
 
     # Heavy object detection runs in the background so it never stalls the control
@@ -337,10 +484,9 @@ def main(camera, wheels, leds, stop_event):
                 continue
             _publish_frame(frame)
 
-            if state == RobotState.LANE_FOLLOWING:
-                if stop_event.is_set():
-                    break
-
+            # Absolute-priority obstacle stop: interrupts every state (turns,
+            # crossing, waiting, peeking) except OBSTACLE_STOP itself.
+            if state != RobotState.OBSTACLE_STOP:
                 stop_now, reason = obstacle_ahead()
                 if stop_now:
                     print(f"Obstacle: {reason}")
@@ -348,6 +494,10 @@ def main(camera, wheels, leds, stop_event):
                     state = RobotState.OBSTACLE_STOP
                     set_state_leds(leds, state)
                     continue
+
+            if state == RobotState.LANE_FOLLOWING:
+                if stop_event.is_set():
+                    break
 
                 # After acting on a sign, ignore signs briefly so the bot clears the
                 # intersection instead of turning again at the next sign (square loop).
@@ -411,28 +561,51 @@ def main(camera, wheels, leds, stop_event):
                 if stop_event.wait(wait_seconds):
                     break
 
-                clear_streak = 0
-                announced_yield = False
-                state = RobotState.YIELD_CHECK
-                set_state_leds(leds, state)
+                # Physically glance left, then right, for cross traffic before
+                # entering the intersection (a forward-only check can't see the
+                # cross streets). Left has priority.
+                result = peek_left_right(wheels, camera, stop_event)
+                if result == "stopped":
+                    break
+                if result == "obstacle":
+                    wheels.set_wheels_speed(0.0, 0.0)
+                    state = RobotState.OBSTACLE_STOP
+                    set_state_leds(leds, state)
+                    continue
+                if result == "left":
+                    # Vehicle on our left has priority — hold until it clears.
+                    announced_yield = False
+                    clear_streak = 0
+                    yield_deadline = time.time() + LEFT_YIELD_TIMEOUT
+                    state = RobotState.YIELD_CHECK
+                    set_state_leds(leds, state)
+                else:
+                    # Right/clear — we may go. Cross, then resume on the far side.
+                    if cross_intersection(wheels, camera, stop_event):
+                        break
+                    resume_cooldown_until = time.time() + SIGN_COOLDOWN
+                    detected_tag_id = None
+                    detected_sign = None
+                    state = RobotState.LANE_FOLLOWING
+                    set_state_leds(leds, state)
 
             elif state == RobotState.YIELD_CHECK:
                 if stop_event.is_set():
                     break
 
-                # Right-of-way: stay stopped while another robot is crossing; the
-                # one already in the intersection goes first. Proceed once clear.
+                # Left has priority: stay stopped while a vehicle is still on the
+                # left, up to LEFT_YIELD_TIMEOUT, then proceed once it clears.
                 wheels.set_wheels_speed(0.0, 0.0)
-                if cross_traffic():
+                if cross_traffic() and time.time() < yield_deadline:
                     if not announced_yield:
-                        print("Yielding: letting another robot pass")
+                        print("Yielding: vehicle on the left has priority")
                         announced_yield = True
                     clear_streak = 0
                     if stop_event.wait(0.1):
                         break
                 else:
                     clear_streak += 1
-                    if clear_streak >= 3:           # clear for a few checks -> go
+                    if clear_streak >= VEHICLE_CLEAR_FRAMES:
                         # Cross straight through the intersection (the follower can't
                         # track the crossing markings), then resume on the far side.
                         if cross_intersection(wheels, camera, stop_event):
