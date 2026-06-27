@@ -1,10 +1,15 @@
 import time
 import random
 import threading
+import functools
 import cv2
 import numpy as np
 import yaml
 from enum import Enum, auto
+
+# Flush every print immediately so the dashboard's piped log shows decisions
+# live (Python block-buffers stdout when it isn't a TTY, e.g. on the robot).
+print = functools.partial(print, flush=True)
 
 with open("config/project_config.yaml", "r") as f:
     config = yaml.safe_load(f)
@@ -27,9 +32,12 @@ MIN_TAG_PIXELS = config["thresholds"].get("min_tag_pixels", 45)
 # After a turn, ignore signs for this long so the bot drives clear of the
 # intersection instead of turning again at the next turn sign (square loop).
 SIGN_COOLDOWN = config["thresholds"].get("sign_cooldown_seconds", 8.0)
-# Project-specific lane-follow tuning (sharp-curve friendly), separate from the
-# visual_lane_servoing task's own config.
-PROJECT_LANE_CONFIG = "config/project_lane_config.yaml"
+# Project-specific lane-follow tuning. The real track and the sim's tight 90-deg
+# curves need different speeds, so there are two profiles; main() picks the sim
+# one automatically when it sees the Godot (simulation) wheel driver.
+PROJECT_LANE_CONFIG     = "config/project_lane_config.yaml"       # real bot
+PROJECT_LANE_SIM_CONFIG = "config/project_lane_sim_config.yaml"   # simulation
+_lane_config_path = PROJECT_LANE_CONFIG
 
 
 class RobotState(Enum):
@@ -75,19 +83,28 @@ TURN_SPEEDS = {
 
 
 def set_state_leds(leds, state):
-    """Light all LEDs with the color for `state`. No-op when leds is None."""
+    """Light all LEDs with the color for `state`. No-op when leds is None.
+
+    Wrapped in try/except: a flaky I2C LED bus (seen on some bots) must never
+    crash the control loop.
+    """
     if not leds:
         return
     color = STATE_COLORS.get(state, [0.0, 0.0, 0.0])
-    for i in LED_INDICES:
-        leds.set_rgb(i, color)
+    try:
+        for i in LED_INDICES:
+            leds.set_rgb(i, color)
+    except Exception:
+        pass
 
 
-# AprilTag detection backend. pupil_apriltags is primary (known-good here); the
-# OpenCV aruco 36h11 detector is a fallback for environments where
-# pupil_apriltags isn't installed.
+# AprilTag detection backend, in order of preference:
+#   1. pupil_apriltags (used in the sim)
+#   2. OpenCV aruco 36h11 (if opencv-contrib is present)
+#   3. built-in raw decoder (cv2 + numpy only) — for the robot, which has
+#      neither library installed.
 _detector = None
-_detector_backend = None   # "pupil" | "aruco" | "none"
+_detector_backend = None   # "pupil" | "aruco" | "raw" | "none"
 
 
 def _get_detector():
@@ -117,9 +134,12 @@ def _get_detector():
         _detector_backend = "aruco"
         return _detector
     except Exception as e:
-        print(f"[project] no AprilTag backend available ({e}); sign detection disabled")
-        _detector_backend = "none"
-        _detector = None
+        print(f"[project] OpenCV aruco unavailable ({e}); using built-in raw decoder")
+
+    # Backend 3: dependency-free raw 36h11 decoder (cv2 + numpy only). Always
+    # available, so sign detection works on the robot with no extra install.
+    _detector_backend = "raw"
+    _detector = None
     return _detector
 
 
@@ -129,18 +149,89 @@ def _edge_size(corners):
     return max(float(np.linalg.norm(c[i] - c[(i + 1) % 4])) for i in range(4))
 
 
+# --- dependency-free AprilTag 36h11 decoder (cv2 + numpy only) ---
+# Canonical 36-bit codes for this project's tags, generated from the sim's own
+# tag textures and verified against known-good 36h11 codes. The decoder tries
+# all 4 rotations of each detected tag, so one code per tag is enough.
+_CODES_36H11 = {
+    0xd97f18b49: 1,
+    0xdd280910e: 2,
+    0xe479e9c98: 3,
+    0xebcbca822: 4,
+    0x22b1dfead: 8,
+    0x265ad0472: 9,
+    0x34fe91b86: 10,
+    0x3ff962cd5: 11,
+}
+_DST_PTS = np.array([[0, 0], [79, 0], [79, 79], [0, 79]], dtype=np.float32)
+
+
+def _order_corners(pts):
+    """Sort 4 points into TL, TR, BR, BL order."""
+    pts = pts.astype(np.float32)
+    s = pts.sum(axis=1)
+    d = np.diff(pts, axis=1).ravel()
+    return np.array([pts[np.argmin(s)], pts[np.argmin(d)],
+                     pts[np.argmax(s)], pts[np.argmax(d)]])
+
+
+def _decode_warped(bw80):
+    """Sample the 8x8 grid of an 80x80 binary tag; return tag_id or None."""
+    c = np.arange(8) * 10 + 5
+    bits = bw80[np.ix_(c, c)]
+    border = np.concatenate([bits[0, :], bits[7, :], bits[1:7, 0], bits[1:7, 7]])
+    if np.any(border != 0):          # outer ring must be black
+        return None
+    inner = bits[1:7, 1:7]
+    for k in range(4):               # try all 4 rotations
+        code = int(np.rot90(inner, k).ravel().dot(1 << np.arange(35, -1, -1, dtype=np.int64)))
+        if code in _CODES_36H11:
+            return _CODES_36H11[code]
+    return None
+
+
+def _raw_decode(gray):
+    """Detect 36h11 tags with only base OpenCV. Returns [(tag_id, corners)]."""
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                   cv2.THRESH_BINARY_INV, 21, 5)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    h, w = gray.shape
+    max_area = h * w * 0.5
+    out, seen = [], set()
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < 300 or area > max_area:
+            continue
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+        if len(approx) != 4 or not cv2.isContourConvex(approx):
+            continue
+        src = _order_corners(approx.reshape(4, 2))
+        M = cv2.getPerspectiveTransform(src, _DST_PTS)
+        warped = cv2.warpPerspective(gray, M, (80, 80))
+        _, bw = cv2.threshold(warped, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        tid = _decode_warped(bw)
+        if tid is not None and tid not in seen:
+            seen.add(tid)
+            out.append((tid, src))
+    return out
+
+
 def _raw_detections(frame):
     """Return [(tag_id, corners)] for every tag in `frame`, via the active backend."""
-    det = _get_detector()
-    if det is None:
-        return []
+    _get_detector()
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if _detector_backend == "raw":
+        return _raw_decode(gray)
     if _detector_backend == "aruco":
-        corners, ids, _ = det.detectMarkers(gray)
+        corners, ids, _ = _detector.detectMarkers(gray)
         if ids is None:
             return []
         return [(int(i), c.reshape(-1, 2)) for c, i in zip(corners, ids.flatten())]
-    return [(int(r.tag_id), np.asarray(r.corners, dtype=float)) for r in det.detect(gray)]
+    if _detector_backend == "pupil":
+        return [(int(r.tag_id), np.asarray(r.corners, dtype=float)) for r in _detector.detect(gray)]
+    return []   # backend == "none"
 
 
 # Temporal confirmation: require the same nearest tag for this many consecutive
@@ -195,7 +286,7 @@ def _get_lane_agent():
     if _lane_agent is None and not _lane_agent_failed:
         try:
             from tasks.visual_lane_servoing.packages.agent import LaneServoingAgent
-            _lane_agent = LaneServoingAgent(config_path=PROJECT_LANE_CONFIG)
+            _lane_agent = LaneServoingAgent(config_path=_lane_config_path)
         except Exception as e:
             print(f"[project] lane follower unavailable ({e}); driving straight")
             _lane_agent_failed = True
@@ -463,6 +554,13 @@ def cross_traffic():
 
 
 def main(camera, wheels, leds, stop_event):
+    # The sim's tight 90-deg curves need a slower lane profile than the real
+    # track; auto-select it from the Godot (simulation) wheel driver.
+    global _lane_config_path
+    if "godot" in type(wheels).__module__.lower():
+        _lane_config_path = PROJECT_LANE_SIM_CONFIG
+        print(f"[project] simulation detected -> lane profile: {_lane_config_path}")
+
     state = RobotState.LANE_FOLLOWING
     detected_tag_id = None
     detected_sign = None
@@ -647,4 +745,7 @@ def main(camera, wheels, leds, stop_event):
     finally:
         wheels.set_wheels_speed(0.0, 0.0)
         if leds:
-            leds.all_off()
+            try:
+                leds.all_off()
+            except Exception:
+                pass

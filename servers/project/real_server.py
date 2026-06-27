@@ -41,9 +41,23 @@ generate_frames = make_frame_generator(lambda: camera, _visualize, quality=70, r
 
 
 @app.route('/video')
+@app.route('/camera')
 def video():
+    # Served at both /video and /camera so the dashboard's embed and direct
+    # browser access both work.
     return Response(generate_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/')
+def index():
+    # Tiny page so a bare http://<bot>:5000/ shows the live feed instead of 404.
+    return (
+        "<!doctype html><html><head><title>DuckieBot Camera</title></head>"
+        "<body style='margin:0;background:#111;text-align:center'>"
+        "<img src='/video' style='max-width:100%;height:auto'/>"
+        "</body></html>"
+    )
 
 
 @app.route('/shutdown')

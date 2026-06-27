@@ -342,6 +342,15 @@ def package_task(task_name):
     with tarfile.open(fileobj=buf, mode='w:gz') as tar:
         print(f"   Adding packages: tasks/{task_name}/packages/")
         tar.add(task_packages_dir, arcname=f'tasks/{task_name}/packages', filter=no_pycache)
+        # The project task imports the lane follower and the object detector from
+        # sibling tasks; bundle their packages too so the deployed code stays in
+        # sync (the bot otherwise keeps its own, possibly stale, copies).
+        if task_name == 'project':
+            for dep in ('visual_lane_servoing', 'object_detection'):
+                dep_pkg = os.path.join(PROJECT_ROOT, 'tasks', dep, 'packages')
+                if os.path.exists(dep_pkg):
+                    print(f"   Adding dependency: tasks/{dep}/packages/")
+                    tar.add(dep_pkg, arcname=f'tasks/{dep}/packages', filter=no_pycache)
         if os.path.exists(config_dir):
             print(f"   Adding configs: config/")
             tar.add(config_dir, arcname='config', filter=no_pycache)

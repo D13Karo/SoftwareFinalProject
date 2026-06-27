@@ -13,6 +13,7 @@
 [ext_resource type="Texture2D" uid="uid://bbdqjg60g1ey7" path="res://textures/tag36h11/tag36_11_00008.png" id="16_tag08"]
 [ext_resource type="Texture2D" uid="uid://dd71v68mb021m" path="res://textures/tag36h11/tag36_11_00009.png" id="17_tag09"]
 [ext_resource type="Texture2D" uid="uid://twr1j70uybb4" path="res://textures/tag36h11/tag36_11_00011.png" id="18_tag11"]
+[ext_resource type="Texture2D" uid="uid://dph36awmblbdc" path="res://textures/tag36h11/tag36_11_00010.png" id="19_tag10"]
 [ext_resource type="PackedScene" uid="uid://bm6eeklw3fh22" path="res://scenes/objects/obj_parking_sign.tscn" id="8_tw3f0"]
 [ext_resource type="PackedScene" uid="uid://by8pqr474iaqj" path="res://scenes/robot/duckie_bot.tscn" id="9_5xmy2"]
 [ext_resource type="Script" uid="uid://frrhxfeqwt4d" path="res://scripts/path_follow_3d.gd" id="11_ucdee"]
@@ -289,6 +290,10 @@ sign_texture = ExtResource("7_xv6rw")
 [node name="Sign_4_6" parent="Signs" unique_id=914577599 instance=ExtResource("6_n1yv4")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4, 0.091, 3.6)
 sign_texture = ExtResource("15_tag04")
+
+[node name="Sign_LeftT_3_5" parent="Signs" unique_id=771100010 instance=ExtResource("6_n1yv4")]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 2.4, 0.091, 3.0)
+sign_texture = ExtResource("19_tag10")
 
 [node name="Sign_10_9" parent="Signs" unique_id=50444080 instance=ExtResource("6_n1yv4")]
 transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 6, 0.091, 5.4)

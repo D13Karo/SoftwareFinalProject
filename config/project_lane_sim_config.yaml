@@ -1,0 +1,12 @@
+# Lane tuning for the SIMULATION only (auto-selected by agent.main when the
+# Godot wheel driver is detected). The sim map has tight 90-deg curve tiles, so
+# it crawls and steers harder on curves; the real bot uses project_lane_config.yaml.
+base_speed: 0.12
+curve_speed: 0.07
+curve_boost: 1.6
+curve_threshold: 200
+d_gain: 0.35
+detection_threshold: 100
+max_steer: 0.5
+p_gain: 0.16
+steering_threshold: 0.2
